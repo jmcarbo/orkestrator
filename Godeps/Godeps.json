@@ -1,0 +1,24 @@
+{
+	"ImportPath": "github.com/jmcarbo/orkestrator",
+	"GoVersion": "go1.3.3",
+	"Deps": [
+		{
+			"ImportPath": "github.com/armon/consul-api",
+			"Rev": "1b81c8e0c4cbf1d382310e4c0dc11221632e79d1"
+		},
+		{
+			"ImportPath": "github.com/codegangsta/inject",
+			"Comment": "v1.0-rc1-4-g4b81725",
+			"Rev": "4b8172520a03fa190f427bbd284db01b459bfce7"
+		},
+		{
+			"ImportPath": "github.com/codeskyblue/go-sh",
+			"Comment": "v0.1-26-g7a1ecf3",
+			"Rev": "7a1ecf31d357d6725db2110109de1795a5b4b14a"
+		},
+		{
+			"ImportPath": "github.com/nu7hatch/gouuid",
+			"Rev": "179d4d0c4d8d407a32af483c2354df1d2c91e6c3"
+		}
+	]
+}
