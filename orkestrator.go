@@ -8,12 +8,14 @@ import (
 	"github.com/armon/consul-api"
 	"github.com/codeskyblue/go-sh"
 	"github.com/nu7hatch/gouuid"
+  "github.com/codegangsta/cli"
 	"io"
 	"io/ioutil"
 	"log"
 	"strings"
 	"sync"
 	"time"
+  "os"
 )
 
 const (
@@ -52,11 +54,14 @@ func NewScheduler(name string, client *consulapi.Client) *Scheduler {
 	agent := client.Agent()
 	nodeName, _ := agent.NodeName()
 	jKey := fmt.Sprintf("schedulers/%s/%s", nodeName, name)
-	jkv := &consulapi.KVPair{Key: jKey, Value: []byte("stopped")}
-	_, err := kv.Put(jkv, nil)
-	if err != nil {
-		return nil
-	}
+  jkv, _, _ := kv.Get(jKey, nil)
+  if jkv == nil {
+    jkv2 := &consulapi.KVPair{Key: jKey, Value: []byte("stopped")}
+    _, err := kv.Put(jkv2, nil)
+    if err != nil {
+      return nil
+    }
+  }
 	return &Scheduler{ID: name, Name: name, Policy: "", Client: client, Mutex: m}
 }
 
@@ -88,7 +93,7 @@ func (s *Scheduler) GetStatus() string {
 func (s *Scheduler) AddJob(job *Job) error {
 	jKey := fmt.Sprintf("jobs/%s/%s", s.ID, job.ID)
 	kv := s.Client.KV()
-	cjkv, _, _ := kv.Get(jKey, nil)
+	cjkv, _, err := kv.Get(jKey, nil)
 	if cjkv != nil {
 		return errors.New("JobExists")
 	}
@@ -101,6 +106,7 @@ func (s *Scheduler) AddJob(job *Job) error {
 	jkv := &consulapi.KVPair{Key: jKey, Value: b}
 	_, err = kv.Put(jkv, nil)
 	if err != nil {
+    //log.Printf("Error adding %#v\n", jkv)
 		return err
 	}
 
@@ -108,6 +114,7 @@ func (s *Scheduler) AddJob(job *Job) error {
 	jkv = &consulapi.KVPair{Key: jKey}
 	_, err = kv.Put(jkv, nil)
 	if err != nil {
+    //log.Printf("Error adding %#v\n", jkv)
 		return err
 	}
 
@@ -289,9 +296,9 @@ func (s *Scheduler) RunJob(jobID string) error {
 		return err
 	}
 
-	if job.LogOutput {
+	//if job.LogOutput {
 		log.Printf("Executing **** %s\n", jobID)
-	}
+	//}
 	job.StartTime = time.Now().UnixNano()
 	job.StartTimeStr = fmt.Sprintln(time.Now())
 	job.ExecutionNode = s.AgentName()
@@ -399,7 +406,8 @@ func (s *Scheduler) Start() <-chan string {
 			//log.Printf("Scheduler job iteration %d", i)
 			keys, _, err := kv.List(qname, &consulapi.QueryOptions{AllowStale: false, RequireConsistent: true, WaitIndex: modi})
 			if err != nil {
-				s.SetStatus("Error")
+        log.Println(err)
+				//s.SetStatus("Error")
 			}
 
 			for _, a := range keys {
@@ -425,6 +433,7 @@ func (s *Scheduler) Start() <-chan string {
 				}
 			*/
 		}
+    log.Printf("<<<<<<<<<<<<<<<<<<<<<<< %s\n", s.GetStatus())
 		c <- "End"
 	}()
 	return c
@@ -461,13 +470,83 @@ func Connect() *consulapi.Client {
 }
 
 func main() {
-	log.Println("Starting orkestrator ...")
-	client := Connect()
-	sche := NewScheduler("testschedule", client)
-	if sche != nil {
-		c := sche.Start()
-		<-c
-	}
+  app := cli.NewApp()
+  app.Name = "orkestrator"
+  app.Usage = "orchestrate consul cluster!"
+  app.Flags = []cli.Flag {
+    cli.StringFlag{
+      Name: "scheduler",
+      Value: "main_scheduler",
+      Usage: "scheduler name",
+    },
+  }
+  app.Commands = []cli.Command{
+  {
+    Name: "start",
+    ShortName: "s",
+    Usage:     "start scheduler",
+    Action: func(c *cli.Context) {
+      client := Connect()
+      sche := NewScheduler(c.GlobalString("scheduler"), client)
+      if sche != nil {
+	      log.Printf("Starting orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
+        ch := sche.Start()
+        <-ch
+      }
+    },
+  },
+  {
+    Name: "stop",
+    ShortName: "t",
+    Usage:     "stop scheduler",
+    Action: func(c *cli.Context) {
+      client := Connect()
+      sche := NewScheduler(c.GlobalString("scheduler"), client)
+      if sche != nil {
+	      log.Printf("Stoping orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
+        sche.Stop()
+      }
+    },
+  },
+  {
+    Name: "addjob",
+    ShortName: "a",
+    Usage:     "add job",
+    Flags:   []cli.Flag {
+      cli.StringFlag{
+        Name: "id",
+        Value: func() string { s, _ := uuid.NewV4(); return s.String() }(),
+        Usage: "job id",
+      },
+      cli.StringFlag{
+        Name: "command",
+        Value: "echo hello world",
+        Usage: "job command",
+      },
+      cli.BoolFlag{
+        Name: "log",
+        Usage: "Log job output",
+      },
+    },
+    Action: func(c *cli.Context) {
+      client := Connect()
+      sche := NewScheduler(c.GlobalString("scheduler"), client)
+      if sche != nil {
+	      log.Printf("Adding job to orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
+        var job Job
+        job.ID = c.String("id")
+        job.Name = c.String("id")
+        job.Command = c.String("command")
+        job.LogOutput = c.Bool("log")
+        err:=sche.AddJob(&job)
+        if err !=nil {
+          log.Println(err)
+        }
+      }
+    },
+  },
+  }
+  app.Run(os.Args)
 }
 
 /* SCRATCH CODE TO DELETE
