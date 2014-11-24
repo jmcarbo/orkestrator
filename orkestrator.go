@@ -1,6 +1,9 @@
 package main
 
 import (
+  "io"
+  "bytes"
+  "io/ioutil"
   "strings"
   "time"
   "sync"
@@ -10,7 +13,29 @@ import (
   "encoding/json"
   "github.com/armon/consul-api"
   "github.com/nu7hatch/gouuid"
+  "github.com/codeskyblue/go-sh"
 )
+
+const (
+  execution_timeout = time.Duration(60)
+)
+
+func OutputAll(s *sh.Session) (out []byte, oerr []byte, err error) {
+  oldout := s.Stdout
+  olderr := s.Stderr
+  defer func() {
+      s.Stdout = oldout
+      s.Stderr = olderr
+  }()
+  stdout := bytes.NewBuffer(nil)
+  stderr := bytes.NewBuffer(nil)
+  s.Stdout = stdout
+  s.Stderr = stderr
+  err = s.Run()
+  out = stdout.Bytes()
+  oerr = stderr.Bytes()
+  return
+}
 
 type Scheduler struct {
   ID string
@@ -65,6 +90,15 @@ func (s *Scheduler)GetJobKV(jobID string) (*consulapi.KVPair, error) {
   }
 
   return jkv, nil
+}
+
+func (s *Scheduler) AgentName() string  {
+  agent :=s.Client.Agent()
+  name, err:= agent.NodeName()
+  if err != nil {
+    return ""
+  }
+  return name
 }
 
 func (s *Scheduler) updateCheck(check string)  {
@@ -170,11 +204,70 @@ func (s *Scheduler)UnlockJob(jobID string) error {
   return nil
 }
 
+func (s *Scheduler)decodeJob(jobid string) (Job, error) {
+  var j Job
+  jkv, err := s.GetJobKV(jobid) 
+  if err != nil {
+    return j,err
+  }
+
+  dec := json.NewDecoder(strings.NewReader(string(jkv.Value)))
+  //for {
+  if err := dec.Decode(&j); err == io.EOF {
+      //break
+    return j, err
+  } else if err != nil {
+    return j, err
+  }
+  //}
+  return j, nil
+}
+
 func (s *Scheduler)RunJob(jobID string) error {
   _, err := s.LockJob(jobID)
   if err != nil {
     return err
   }
+
+  log.Printf("Executing **** %s\n", jobID)
+  job, err := s.decodeJob(jobID)
+  job.StartTime = time.Now().UnixNano()
+  job.StartTimeStr = fmt.Sprintln(time.Now())
+  job.ExecutionNode = s.AgentName() 
+  if err != nil {
+    log.Println("Error decoding job json")
+    job.Output = "Error decoding job json"
+  } else {
+    if job.NoWait == true {
+      sss := sh.Command("/bin/bash", "-c", string(job.Command))
+      sss.Stdout = ioutil.Discard
+      sss.Stderr = ioutil.Discard
+      sss.Start()
+    } else {
+      lapsus := execution_timeout
+      if job.Timeout > 0 {
+        lapsus = job.Timeout
+      }
+      sss := sh.Command("/bin/bash", "-c", string(job.Command)).SetTimeout(lapsus * time.Second)
+      out, stderr, err := OutputAll(sss)
+      if string(out) != "" {
+        log.Printf("Output job %s **** %s\n", job.ID, string(out))
+      }
+      if string(stderr) != "" {
+        log.Printf("Error job %s **** %s\n", job.ID, string(stderr))
+      }
+      if err != nil {
+        log.Printf("Exit error %v", err)
+        job.ExitErrors = fmt.Sprintf("%v", err)
+      }
+      job.Output = string(out)
+      job.OutputErrors = string(stderr)
+    }
+  } 
+  job.EndTime = time.Now().UnixNano() 
+  job.EndTimeStr = fmt.Sprintln(time.Now())
+
+
   err = s.UnlockJob(jobID)
   if err != nil {
     return err
@@ -273,9 +366,17 @@ type ExecutionRun struct {
 }
 
 type Job struct {
-  ID string
-  Command string
+  ID, Name, Command, Output, OutputErrors string
   Status string
+  Type string // default is "shell"
+  NoWait bool
+  StartTime int64
+  EndTime int64
+  StartTimeStr string
+  EndTimeStr string
+  ExecutionNode string
+  Timeout time.Duration //Timeout in seconds
+  ExitErrors string
 }
 
 func Connect() *consulapi.Client {
