@@ -121,6 +121,46 @@ func (s *Scheduler) AddJob(job *Job) error {
 	return nil
 }
 
+func (s *Scheduler) SaveRuns(job *Job) error {
+  kv := s.Client.KV()
+  for _, r := range job.runs {
+    b, err := json.Marshal(r)
+    if err != nil {
+      return err
+    }
+    jKey := fmt.Sprintf("jobs/%s/%s/runs/%s/%s", s.ID, job.ID, r.Node, r.ID)
+    log.Println(jKey)
+    jkv := &consulapi.KVPair{Key: jKey, Value: b }
+    _, err = kv.Put(jkv, nil)
+    if err != nil {
+      return err
+    }
+  }
+  return nil
+}
+
+func (s *Scheduler) LoadRuns(job *Job) error {
+  kv := s.Client.KV()
+  runs := fmt.Sprintf("jobs/%s/%s/runs/", s.ID, job.ID)
+	keys, _, err := kv.List(runs, nil)
+  if err != nil {
+    return err
+  }
+
+	for _, pair := range keys {
+    var e ExecutionRun
+	  dec := json.NewDecoder(strings.NewReader(string(pair.Value)))
+	  if err := dec.Decode(&e); err == io.EOF {
+		  return err
+	  } else if err != nil {
+		  return err
+	  }
+
+		job.runs = append(job.runs, e)
+	}
+  return nil
+}
+
 func (s *Scheduler) SaveJob(job *Job) error {
 	jKey := fmt.Sprintf("jobs/%s/%s", s.ID, job.ID)
 	kv := s.Client.KV()
@@ -136,6 +176,7 @@ func (s *Scheduler) SaveJob(job *Job) error {
 		return err
 	}
 
+  s.SaveRuns(job)
 	return nil
 }
 
@@ -283,12 +324,14 @@ func (s *Scheduler) GetJob(jobid string) (Job, error) {
 		return j, err
 	}
 	//}
+
+  s.LoadRuns(&j)
 	return j, nil
 }
 
 func (s *Scheduler) RunJob(jobID string) error {
 	job, err := s.GetJob(jobID)
-	if job.Status != "" {
+	if job.Status != "" && !job.AllNodes {
 		return errors.New("Job status not pending")
 	}
 	_, err = s.LockJob(jobID)
@@ -441,8 +484,11 @@ func (s *Scheduler) Start() <-chan string {
 
 type ExecutionRun struct {
 	ID     string
+  JobId  string
+  Node   string
 	Status string
 	Output string
+  OutputErrors string
 }
 
 type Job struct {
@@ -458,6 +504,8 @@ type Job struct {
 	Timeout                                 time.Duration //Timeout in seconds
 	ExitErrors                              string
 	LogOutput                               bool
+  AllNodes                                bool
+  runs                                   []ExecutionRun 
 }
 
 func Connect() *consulapi.Client {
