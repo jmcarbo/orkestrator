@@ -7,6 +7,11 @@
 			"Rev": "1b81c8e0c4cbf1d382310e4c0dc11221632e79d1"
 		},
 		{
+			"ImportPath": "github.com/codegangsta/cli",
+			"Comment": "1.2.0-38-g9908e96",
+			"Rev": "9908e96513e5a94de37004098a3974a567f18111"
+		},
+		{
 			"ImportPath": "github.com/codegangsta/inject",
 			"Comment": "v1.0-rc1-4-g4b81725",
 			"Rev": "4b8172520a03fa190f427bbd284db01b459bfce7"

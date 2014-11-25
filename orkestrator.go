@@ -6,16 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"github.com/armon/consul-api"
+	"github.com/codegangsta/cli"
 	"github.com/codeskyblue/go-sh"
 	"github.com/nu7hatch/gouuid"
-  "github.com/codegangsta/cli"
 	"io"
 	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
-  "os"
 )
 
 const (
@@ -54,14 +54,14 @@ func NewScheduler(name string, client *consulapi.Client) *Scheduler {
 	agent := client.Agent()
 	nodeName, _ := agent.NodeName()
 	jKey := fmt.Sprintf("schedulers/%s/%s", nodeName, name)
-  jkv, _, _ := kv.Get(jKey, nil)
-  if jkv == nil {
-    jkv2 := &consulapi.KVPair{Key: jKey, Value: []byte("stopped")}
-    _, err := kv.Put(jkv2, nil)
-    if err != nil {
-      return nil
-    }
-  }
+	jkv, _, _ := kv.Get(jKey, nil)
+	if jkv == nil {
+		jkv2 := &consulapi.KVPair{Key: jKey, Value: []byte("stopped")}
+		_, err := kv.Put(jkv2, nil)
+		if err != nil {
+			return nil
+		}
+	}
 	return &Scheduler{ID: name, Name: name, Policy: "", Client: client, Mutex: m}
 }
 
@@ -106,7 +106,7 @@ func (s *Scheduler) AddJob(job *Job) error {
 	jkv := &consulapi.KVPair{Key: jKey, Value: b}
 	_, err = kv.Put(jkv, nil)
 	if err != nil {
-    //log.Printf("Error adding %#v\n", jkv)
+		//log.Printf("Error adding %#v\n", jkv)
 		return err
 	}
 
@@ -114,51 +114,67 @@ func (s *Scheduler) AddJob(job *Job) error {
 	jkv = &consulapi.KVPair{Key: jKey}
 	_, err = kv.Put(jkv, nil)
 	if err != nil {
-    //log.Printf("Error adding %#v\n", jkv)
+		//log.Printf("Error adding %#v\n", jkv)
 		return err
 	}
 
 	return nil
 }
 
+func (s *Scheduler) SaveRun(job *Job, er *ExecutionRun) error {
+	kv := s.Client.KV()
+	b, err := json.Marshal(er)
+	if err != nil {
+		return err
+	}
+	jKey := fmt.Sprintf("jobs/%s/%s/runs/%s/%s", s.ID, job.ID, er.Node, er.ID)
+	log.Println(jKey)
+	jkv := &consulapi.KVPair{Key: jKey, Value: b}
+	_, err = kv.Put(jkv, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Scheduler) SaveRuns(job *Job) error {
-  kv := s.Client.KV()
-  for _, r := range job.runs {
-    b, err := json.Marshal(r)
-    if err != nil {
-      return err
-    }
-    jKey := fmt.Sprintf("jobs/%s/%s/runs/%s/%s", s.ID, job.ID, r.Node, r.ID)
-    log.Println(jKey)
-    jkv := &consulapi.KVPair{Key: jKey, Value: b }
-    _, err = kv.Put(jkv, nil)
-    if err != nil {
-      return err
-    }
-  }
-  return nil
+	kv := s.Client.KV()
+	for _, r := range job.runs {
+		b, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		jKey := fmt.Sprintf("jobs/%s/%s/runs/%s/%s", s.ID, job.ID, r.Node, r.ID)
+		log.Println(jKey)
+		jkv := &consulapi.KVPair{Key: jKey, Value: b}
+		_, err = kv.Put(jkv, nil)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Scheduler) LoadRuns(job *Job) error {
-  kv := s.Client.KV()
-  runs := fmt.Sprintf("jobs/%s/%s/runs/", s.ID, job.ID)
+	kv := s.Client.KV()
+	runs := fmt.Sprintf("jobs/%s/%s/runs/", s.ID, job.ID)
 	keys, _, err := kv.List(runs, nil)
-  if err != nil {
-    return err
-  }
+	if err != nil {
+		return err
+	}
 
 	for _, pair := range keys {
-    var e ExecutionRun
-	  dec := json.NewDecoder(strings.NewReader(string(pair.Value)))
-	  if err := dec.Decode(&e); err == io.EOF {
-		  return err
-	  } else if err != nil {
-		  return err
-	  }
+		var e ExecutionRun
+		dec := json.NewDecoder(strings.NewReader(string(pair.Value)))
+		if err := dec.Decode(&e); err == io.EOF {
+			return err
+		} else if err != nil {
+			return err
+		}
 
 		job.runs = append(job.runs, e)
 	}
-  return nil
+	return nil
 }
 
 func (s *Scheduler) SaveJob(job *Job) error {
@@ -176,7 +192,7 @@ func (s *Scheduler) SaveJob(job *Job) error {
 		return err
 	}
 
-  s.SaveRuns(job)
+	//s.SaveRuns(job)
 	return nil
 }
 
@@ -325,8 +341,59 @@ func (s *Scheduler) GetJob(jobid string) (Job, error) {
 	}
 	//}
 
-  s.LoadRuns(&j)
+	s.LoadRuns(&j)
 	return j, nil
+}
+
+func (s *Scheduler) ExecutionRun(job *Job) error {
+	var er ExecutionRun
+	uu, _ := uuid.NewV4()
+	er.ID = uu.String()
+	//if job.LogOutput {
+	log.Printf("Executing **** %s\n", job.ID)
+	//}
+	er.StartTime = time.Now().UnixNano()
+	job.StartTime = time.Now().UnixNano()
+	er.StartTimeStr = fmt.Sprintln(time.Now())
+	job.StartTimeStr = fmt.Sprintln(time.Now())
+	er.Node = s.AgentName()
+	job.ExecutionNode = s.AgentName()
+	if job.NoWait == true {
+		sss := sh.Command("/bin/bash", "-c", string(job.Command))
+		sss.Stdout = ioutil.Discard
+		sss.Stderr = ioutil.Discard
+		sss.Start()
+	} else {
+		lapsus := execution_timeout
+		if job.Timeout > 0 {
+			lapsus = job.Timeout
+		}
+		sss := sh.Command("/bin/bash", "-c", string(job.Command)).SetTimeout(lapsus * time.Second)
+		out, stderr, err := OutputAll(sss)
+		if string(out) != "" && job.LogOutput {
+			log.Printf("Output job %s **** %s\n", job.ID, string(out))
+		}
+		if string(stderr) != "" && job.LogOutput {
+			log.Printf("Error job %s **** %s\n", job.ID, string(stderr))
+		}
+		if err != nil {
+			log.Printf("Exit error %v", err)
+			job.ExitErrors = fmt.Sprintf("%v", err)
+		}
+		er.Output = string(out)
+		job.Output = string(out)
+		er.OutputErrors = string(stderr)
+		job.OutputErrors = string(stderr)
+	}
+	job.EndTime = time.Now().UnixNano()
+	er.EndTime = time.Now().UnixNano()
+	job.EndTimeStr = fmt.Sprintln(time.Now())
+	er.EndTimeStr = fmt.Sprintln(time.Now())
+	job.Status = "done"
+	er.Status = "done"
+
+	s.SaveRun(job, &er)
+	return nil
 }
 
 func (s *Scheduler) RunJob(jobID string) error {
@@ -339,45 +406,8 @@ func (s *Scheduler) RunJob(jobID string) error {
 		return err
 	}
 
-	//if job.LogOutput {
-		log.Printf("Executing **** %s\n", jobID)
-	//}
-	job.StartTime = time.Now().UnixNano()
-	job.StartTimeStr = fmt.Sprintln(time.Now())
-	job.ExecutionNode = s.AgentName()
-	if err != nil {
-		//log.Println("Error decoding job json")
-		job.Output = "Error decoding job json"
-	} else {
-		if job.NoWait == true {
-			sss := sh.Command("/bin/bash", "-c", string(job.Command))
-			sss.Stdout = ioutil.Discard
-			sss.Stderr = ioutil.Discard
-			sss.Start()
-		} else {
-			lapsus := execution_timeout
-			if job.Timeout > 0 {
-				lapsus = job.Timeout
-			}
-			sss := sh.Command("/bin/bash", "-c", string(job.Command)).SetTimeout(lapsus * time.Second)
-			out, stderr, err := OutputAll(sss)
-			if string(out) != "" && job.LogOutput {
-				log.Printf("Output job %s **** %s\n", job.ID, string(out))
-			}
-			if string(stderr) != "" && job.LogOutput {
-				log.Printf("Error job %s **** %s\n", job.ID, string(stderr))
-			}
-			if err != nil {
-				log.Printf("Exit error %v", err)
-				job.ExitErrors = fmt.Sprintf("%v", err)
-			}
-			job.Output = string(out)
-			job.OutputErrors = string(stderr)
-		}
-	}
-	job.EndTime = time.Now().UnixNano()
-	job.EndTimeStr = fmt.Sprintln(time.Now())
-	job.Status = "done"
+	s.ExecutionRun(&job)
+
 	s.SaveJob(&job)
 
 	err = s.UnlockJob(jobID)
@@ -449,7 +479,7 @@ func (s *Scheduler) Start() <-chan string {
 			//log.Printf("Scheduler job iteration %d", i)
 			keys, _, err := kv.List(qname, &consulapi.QueryOptions{AllowStale: false, RequireConsistent: true, WaitIndex: modi})
 			if err != nil {
-        log.Println(err)
+				log.Println(err)
 				//s.SetStatus("Error")
 			}
 
@@ -476,19 +506,24 @@ func (s *Scheduler) Start() <-chan string {
 				}
 			*/
 		}
-    log.Printf("<<<<<<<<<<<<<<<<<<<<<<< %s\n", s.GetStatus())
+		log.Printf("<<<<<<<<<<<<<<<<<<<<<<< %s\n", s.GetStatus())
 		c <- "End"
 	}()
 	return c
 }
 
 type ExecutionRun struct {
-	ID     string
-  JobId  string
-  Node   string
-	Status string
-	Output string
-  OutputErrors string
+	ID           string
+	JobId        string
+	Node         string
+	Status       string
+	Output       string
+	OutputErrors string
+	StartTime    int64
+	EndTime      int64
+	StartTimeStr string
+	EndTimeStr   string
+	ExitErrors   string
 }
 
 type Job struct {
@@ -504,8 +539,8 @@ type Job struct {
 	Timeout                                 time.Duration //Timeout in seconds
 	ExitErrors                              string
 	LogOutput                               bool
-  AllNodes                                bool
-  runs                                   []ExecutionRun 
+	AllNodes                                bool
+	runs                                    []ExecutionRun
 }
 
 func Connect() *consulapi.Client {
@@ -518,83 +553,83 @@ func Connect() *consulapi.Client {
 }
 
 func main() {
-  app := cli.NewApp()
-  app.Name = "orkestrator"
-  app.Usage = "orchestrate consul cluster!"
-  app.Flags = []cli.Flag {
-    cli.StringFlag{
-      Name: "scheduler",
-      Value: "main_scheduler",
-      Usage: "scheduler name",
-    },
-  }
-  app.Commands = []cli.Command{
-  {
-    Name: "start",
-    ShortName: "s",
-    Usage:     "start scheduler",
-    Action: func(c *cli.Context) {
-      client := Connect()
-      sche := NewScheduler(c.GlobalString("scheduler"), client)
-      if sche != nil {
-	      log.Printf("Starting orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
-        ch := sche.Start()
-        <-ch
-      }
-    },
-  },
-  {
-    Name: "stop",
-    ShortName: "t",
-    Usage:     "stop scheduler",
-    Action: func(c *cli.Context) {
-      client := Connect()
-      sche := NewScheduler(c.GlobalString("scheduler"), client)
-      if sche != nil {
-	      log.Printf("Stoping orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
-        sche.Stop()
-      }
-    },
-  },
-  {
-    Name: "addjob",
-    ShortName: "a",
-    Usage:     "add job",
-    Flags:   []cli.Flag {
-      cli.StringFlag{
-        Name: "id",
-        Value: func() string { s, _ := uuid.NewV4(); return s.String() }(),
-        Usage: "job id",
-      },
-      cli.StringFlag{
-        Name: "command",
-        Value: "echo hello world",
-        Usage: "job command",
-      },
-      cli.BoolFlag{
-        Name: "log",
-        Usage: "Log job output",
-      },
-    },
-    Action: func(c *cli.Context) {
-      client := Connect()
-      sche := NewScheduler(c.GlobalString("scheduler"), client)
-      if sche != nil {
-	      log.Printf("Adding job to orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
-        var job Job
-        job.ID = c.String("id")
-        job.Name = c.String("id")
-        job.Command = c.String("command")
-        job.LogOutput = c.Bool("log")
-        err:=sche.AddJob(&job)
-        if err !=nil {
-          log.Println(err)
-        }
-      }
-    },
-  },
-  }
-  app.Run(os.Args)
+	app := cli.NewApp()
+	app.Name = "orkestrator"
+	app.Usage = "orchestrate consul cluster!"
+	app.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:  "scheduler",
+			Value: "main_scheduler",
+			Usage: "scheduler name",
+		},
+	}
+	app.Commands = []cli.Command{
+		{
+			Name:      "start",
+			ShortName: "s",
+			Usage:     "start scheduler",
+			Action: func(c *cli.Context) {
+				client := Connect()
+				sche := NewScheduler(c.GlobalString("scheduler"), client)
+				if sche != nil {
+					log.Printf("Starting orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
+					ch := sche.Start()
+					<-ch
+				}
+			},
+		},
+		{
+			Name:      "stop",
+			ShortName: "t",
+			Usage:     "stop scheduler",
+			Action: func(c *cli.Context) {
+				client := Connect()
+				sche := NewScheduler(c.GlobalString("scheduler"), client)
+				if sche != nil {
+					log.Printf("Stoping orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
+					sche.Stop()
+				}
+			},
+		},
+		{
+			Name:      "addjob",
+			ShortName: "a",
+			Usage:     "add job",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "id",
+					Value: func() string { s, _ := uuid.NewV4(); return s.String() }(),
+					Usage: "job id",
+				},
+				cli.StringFlag{
+					Name:  "command",
+					Value: "echo hello world",
+					Usage: "job command",
+				},
+				cli.BoolFlag{
+					Name:  "log",
+					Usage: "Log job output",
+				},
+			},
+			Action: func(c *cli.Context) {
+				client := Connect()
+				sche := NewScheduler(c.GlobalString("scheduler"), client)
+				if sche != nil {
+					log.Printf("Adding job to orkestrator scheduler %s...\n", c.GlobalString("scheduler"))
+					var job Job
+					job.ID = c.String("id")
+					job.Name = c.String("id")
+					job.Command = c.String("command")
+					job.LogOutput = c.Bool("log")
+					err := sche.AddJob(&job)
+					if err != nil {
+						log.Println(err)
+					}
+				}
+			},
+		},
+	}
+	app.Run(os.Args)
 }
 
 /* SCRATCH CODE TO DELETE
