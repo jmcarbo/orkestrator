@@ -239,7 +239,7 @@ func (s *Scheduler) SaveJob(job *Job) error {
 		return err
 	}
 
-	jkv := &consulapi.KVPair{Key: jKey, Value: b}
+	jkv := &consulapi.KVPair{Key: jKey, Value: b, Session: job.Session}
 	_, err = kv.Put(jkv, nil)
 	if err != nil {
 		return err
@@ -370,6 +370,7 @@ func (s *Scheduler) LockJob(jobID string) (string, error) {
 	}
 
 	jkv.Session = ses
+
 	res, _, err := kv.Acquire(jkv, nil)
 	if err != nil {
 		agent.CheckDeregister(uid.String())
@@ -590,18 +591,21 @@ func (s *Scheduler) ShouldRun(job *Job) bool {
 
 func (s *Scheduler) RunJob(jobID string) error {
 	job, err := s.GetJob(jobID)
-	_, err = s.LockJob(jobID)
+	sess, err := s.LockJob(jobID)
+	job.Session = sess
+	defer s.UnlockJob(jobID)
 	if err != nil {
 		return err
 	}
-	defer s.UnlockJob(jobID)
 
+	log.Println("1Calling should run")
 	if !s.ShouldRun(&job) {
-		err = s.UnlockJob(jobID)
 		return errors.New("Job should not run in this node")
 	}
+	log.Println("2Calling execution run")
 	s.ExecutionRun(&job)
 
+	log.Println("3Calling save run")
 	s.SaveJob(&job)
 
 	return nil
@@ -739,6 +743,7 @@ type Job struct {
 	CheckCommand                            string
 	CheckInterval                           string
 	StopCommand                             string
+	Session                                 string
 	runs                                    []ExecutionRun
 }
 
