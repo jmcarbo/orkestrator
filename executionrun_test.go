@@ -7,7 +7,7 @@ import (
   "reflect"
 )
 
-func initTest(t *testing.T, schedulerName string) *Scheduler {
+func initTest(t *testing.T, schedulerName string, nodeName string) *Scheduler {
 	client := Connect()
 
   jKey := fmt.Sprintf("jobs/%s", schedulerName)
@@ -18,16 +18,16 @@ func initTest(t *testing.T, schedulerName string) *Scheduler {
 
 	se, _, _ := client.Session().List(nil)
 	for _, s := range se {
-		t.Logf("Destroying session %s", s.ID)
+		//t.Logf("Destroying session %s", s.ID)
 		client.Session().Destroy(s.ID, nil)
 	}
 
-	sche := NewScheduler(schedulerName, client)
+	sche := NewScheduler(schedulerName, client, nodeName)
   return sche
 }
 
 func TestSaveRun(t *testing.T) {
-  sche := initTest(t, "tests")
+  sche := initTest(t, "tests", "")
 
   var j Job
   var er []ExecutionRun
@@ -65,7 +65,7 @@ func TestSaveRun(t *testing.T) {
 }
 
 func TestLoadRun(t *testing.T) {
-  sche := initTest(t, "tests")
+  sche := initTest(t, "tests", "")
 
   var j Job
   var er []ExecutionRun

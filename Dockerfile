@@ -1,4 +1,4 @@
-FROM jpetazzo/dind
+FROM ubuntu
 RUN apt-get update && apt-get install -y wget unzip curl
 RUN rm -f consul  
 RUN wget -nc -q https://dl.bintray.com/mitchellh/consul/0.4.1_linux_amd64.zip; 

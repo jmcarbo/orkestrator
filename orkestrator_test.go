@@ -20,17 +20,13 @@ func TestConnection(t *testing.T) {
 }
 
 func TestSchedulerAddJob(t *testing.T) {
-	client := Connect()
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
+	sche := initTest(t, "testschedule", "")
+
+  err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sche := NewScheduler("testschedule", client)
-	err = sche.AddJob(&Job{ID: "blabla"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	kv := client.KV()
+	kv := sche.Client.KV()
 	_, _, err = kv.Get("jobs/testschedule/blabla", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -40,13 +36,8 @@ func TestSchedulerAddJob(t *testing.T) {
 }
 
 func TestRunJob(t *testing.T) {
-	client := Connect()
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sche := NewScheduler("testschedule", client)
-	err = sche.AddJob(&Job{ID: "blabla", Command: "docker ps"})
+	sche := initTest(t, "testschedule", "")
+  err := sche.AddJob(&Job{ID: "blabla", Command: "docker ps"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +51,8 @@ func TestRunJob(t *testing.T) {
 }
 
 func TestLockJob(t *testing.T) {
-	client := Connect()
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sche := NewScheduler("testschedule", client)
-	err = sche.AddJob(&Job{ID: "blabla"})
+	sche := initTest(t, "testschedule", "")
+  err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,13 +73,8 @@ func TestLockJob(t *testing.T) {
 }
 
 func TestUnlockJob(t *testing.T) {
-	client := Connect()
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sche := NewScheduler("testschedule", client)
-	err = sche.AddJob(&Job{ID: "blabla"})
+	sche := initTest(t,"testschedule", "")
+  err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,24 +106,17 @@ func TestUnlockJob(t *testing.T) {
 }
 
 func TestSchedulerListJobs(t *testing.T) {
-	client := Connect()
-	kv := client.KV()
-	_, err := kv.DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sche := NewScheduler("testschedule", client)
+	sche := initTest(t,"testschedule", "")
 
 	for i := 0; i < 100; i++ {
 		strid := fmt.Sprintf("blablabla%d", i)
-		err = sche.AddJob(&Job{ID: strid})
+    err := sche.AddJob(&Job{ID: strid})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	keys, err := sche.ListJobs()
+	keys, _ := sche.ListJobs()
 
 	if len(keys) != 100 {
 		t.Fatalf("Wrong number of jobs. %d instead of 100", len(keys))
@@ -151,13 +125,8 @@ func TestSchedulerListJobs(t *testing.T) {
 }
 
 func TestSchedulerAddExistantJob(t *testing.T) {
-	client := Connect()
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sche := NewScheduler("testschedule", client)
-	err = sche.AddJob(&Job{ID: "blabla"})
+	sche := initTest(t, "testschedule", "")
+  err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,21 +137,8 @@ func TestSchedulerAddExistantJob(t *testing.T) {
 }
 
 func TestSchedulerDeleteExistantJob(t *testing.T) {
-	client := Connect()
-
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	se, _, _ := client.Session().List(nil)
-	for _, s := range se {
-		t.Logf("Destroying session %s", s.ID)
-		client.Session().Destroy(s.ID, nil)
-	}
-
-	sche := NewScheduler("testschedule", client)
-	err = sche.AddJob(&Job{ID: "blabla"})
+	sche := initTest(t, "testschedule", "")
+  err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,21 +149,8 @@ func TestSchedulerDeleteExistantJob(t *testing.T) {
 }
 
 func TestSchedulerDeleteNonExistantJob(t *testing.T) {
-	client := Connect()
-
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	se, _, _ := client.Session().List(nil)
-	for _, s := range se {
-		t.Logf("Destroying session %s", s.ID)
-		client.Session().Destroy(s.ID, nil)
-	}
-
-	sche := NewScheduler("testschedule", client)
-	err = sche.DeleteJob("blabla")
+	sche := initTest(t, "testschedule", "")
+  err := sche.DeleteJob("blabla")
 	if err == nil {
 		t.Fatal("No error deleting non existant job")
 	}
@@ -220,22 +163,10 @@ func TestSchedulerStart(t *testing.T) {
 		}
 	*/
 	maxjobs := 10
-	client := Connect()
-	_, err := client.KV().DeleteTree("jobs/testschedule2", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	se, _, _ := client.Session().List(nil)
-	for _, s := range se {
-		t.Logf("Destroying session %s", s.ID)
-		client.Session().Destroy(s.ID, nil)
-	}
-	sche := NewScheduler("testschedule2", client)
-
+	sche := initTest(t,"testschedule2", "")
 	for i := 0; i < maxjobs; i++ {
 		strid := fmt.Sprintf("blablabla%d", i)
-		err = sche.AddJob(&Job{ID: strid, Command: "echo hello world", LogOutput: false})
+    err := sche.AddJob(&Job{ID: strid, Command: "echo hello world", LogOutput: false})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -265,18 +196,7 @@ func TestSchedulerStop(t *testing.T) {
 			t.Skip("Skipping ...")
 		}
 	*/
-	client := Connect()
-	_, err := client.KV().DeleteTree("jobs/testschedule", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	se, _, _ := client.Session().List(nil)
-	for _, s := range se {
-		t.Logf("Destroying session %s", s.ID)
-		client.Session().Destroy(s.ID, nil)
-	}
-	sche := NewScheduler("testschedule", client)
+	sche := initTest(t, "testschedule", "")
 	sche.Start()
 	c := time.After(time.Second * 2)
 	<-c
