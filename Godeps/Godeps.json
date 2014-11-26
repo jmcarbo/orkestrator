@@ -3,6 +3,11 @@
 	"GoVersion": "go1.3.3",
 	"Deps": [
 		{
+			"ImportPath": "github.com/Sirupsen/logrus",
+			"Comment": "v0.6.1-8-gcc09837",
+			"Rev": "cc09837bcd512ffe6bb2e3f635bed138c4cd6bc8"
+		},
+		{
 			"ImportPath": "github.com/armon/consul-api",
 			"Rev": "1b81c8e0c4cbf1d382310e4c0dc11221632e79d1"
 		},
@@ -17,9 +22,9 @@
 			"Rev": "4b8172520a03fa190f427bbd284db01b459bfce7"
 		},
 		{
-			"ImportPath": "github.com/codeskyblue/go-sh",
-			"Comment": "v0.1-26-g7a1ecf3",
-			"Rev": "7a1ecf31d357d6725db2110109de1795a5b4b14a"
+			"ImportPath": "github.com/jmcarbo/go-sh",
+			"Comment": "v0.1-27-g960cccd",
+			"Rev": "960cccd82463b6c146282d316992db516b343a76"
 		},
 		{
 			"ImportPath": "github.com/nu7hatch/gouuid",

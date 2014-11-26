@@ -22,7 +22,7 @@ func TestConnection(t *testing.T) {
 func TestSchedulerAddJob(t *testing.T) {
 	sche := initTest(t, "testschedule", "")
 
-  err := sche.AddJob(&Job{ID: "blabla"})
+	err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestSchedulerAddJob(t *testing.T) {
 
 func TestRunJob(t *testing.T) {
 	sche := initTest(t, "testschedule", "")
-  err := sche.AddJob(&Job{ID: "blabla", Command: "docker ps"})
+	err := sche.AddJob(&Job{ID: "blabla", Command: "docker ps"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestRunJob(t *testing.T) {
 
 func TestLockJob(t *testing.T) {
 	sche := initTest(t, "testschedule", "")
-  err := sche.AddJob(&Job{ID: "blabla"})
+	err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +73,8 @@ func TestLockJob(t *testing.T) {
 }
 
 func TestUnlockJob(t *testing.T) {
-	sche := initTest(t,"testschedule", "")
-  err := sche.AddJob(&Job{ID: "blabla"})
+	sche := initTest(t, "testschedule", "")
+	err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,11 +106,11 @@ func TestUnlockJob(t *testing.T) {
 }
 
 func TestSchedulerListJobs(t *testing.T) {
-	sche := initTest(t,"testschedule", "")
+	sche := initTest(t, "testschedule", "")
 
 	for i := 0; i < 100; i++ {
 		strid := fmt.Sprintf("blablabla%d", i)
-    err := sche.AddJob(&Job{ID: strid})
+		err := sche.AddJob(&Job{ID: strid})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +126,7 @@ func TestSchedulerListJobs(t *testing.T) {
 
 func TestSchedulerAddExistantJob(t *testing.T) {
 	sche := initTest(t, "testschedule", "")
-  err := sche.AddJob(&Job{ID: "blabla"})
+	err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestSchedulerAddExistantJob(t *testing.T) {
 
 func TestSchedulerDeleteExistantJob(t *testing.T) {
 	sche := initTest(t, "testschedule", "")
-  err := sche.AddJob(&Job{ID: "blabla"})
+	err := sche.AddJob(&Job{ID: "blabla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestSchedulerDeleteExistantJob(t *testing.T) {
 
 func TestSchedulerDeleteNonExistantJob(t *testing.T) {
 	sche := initTest(t, "testschedule", "")
-  err := sche.DeleteJob("blabla")
+	err := sche.DeleteJob("blabla")
 	if err == nil {
 		t.Fatal("No error deleting non existant job")
 	}
@@ -163,10 +163,10 @@ func TestSchedulerStart(t *testing.T) {
 		}
 	*/
 	maxjobs := 10
-	sche := initTest(t,"testschedule2", "")
+	sche := initTest(t, "testschedule2", "")
 	for i := 0; i < maxjobs; i++ {
 		strid := fmt.Sprintf("blablabla%d", i)
-    err := sche.AddJob(&Job{ID: strid, Command: "echo hello world", LogOutput: false})
+		err := sche.AddJob(&Job{ID: strid, Command: "echo hello world", LogOutput: false})
 		if err != nil {
 			t.Fatal(err)
 		}

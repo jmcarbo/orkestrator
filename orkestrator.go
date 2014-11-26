@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	log "github.com/Sirupsen/logrus"
 	"github.com/armon/consul-api"
 	"github.com/codegangsta/cli"
-	"github.com/codeskyblue/go-sh"
+	"github.com/jmcarbo/go-sh"
 	"github.com/nu7hatch/gouuid"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -40,26 +41,26 @@ func OutputAll(s *sh.Session) (out []byte, oerr []byte, err error) {
 }
 
 type Scheduler struct {
-	ID     string
-	Name   string
-	Policy string
-	Client *consulapi.Client
-	Mutex  sync.Mutex
-  nodeName string
+	ID       string
+	Name     string
+	Policy   string
+	Client   *consulapi.Client
+	Mutex    sync.Mutex
+	nodeName string
 }
 
 func NewScheduler(name string, client *consulapi.Client, nodeName string) *Scheduler {
 	var m sync.Mutex
-  var err error
+	var err error
 
 	kv := client.KV()
 	agent := client.Agent()
-  if nodeName == "" {
-	  nodeName, err = agent.NodeName()
-    if err != nil {
-      return nil
-    }
-  }
+	if nodeName == "" {
+		nodeName, err = agent.NodeName()
+		if err != nil {
+			return nil
+		}
+	}
 
 	jKey := fmt.Sprintf("schedulers/%s/%s", nodeName, name)
 	jkv, _, _ := kv.Get(jKey, nil)
@@ -70,7 +71,22 @@ func NewScheduler(name string, client *consulapi.Client, nodeName string) *Sched
 			return nil
 		}
 	}
-  return &Scheduler{ID: name, Name: name, Policy: "", Client: client, Mutex: m, nodeName: nodeName }
+	return &Scheduler{ID: name, Name: name, Policy: "", Client: client, Mutex: m, nodeName: nodeName}
+}
+
+func (s *Scheduler) WaitForDone(target int) error {
+	_, _, _, done, _, err := s.JobsCount()
+	if err != nil {
+		return err
+	}
+	for done < target {
+		_, _, _, done, _, err = s.JobsCount()
+
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Scheduler) SetStatus(status string) error {
@@ -95,28 +111,30 @@ func (s *Scheduler) GetStatus() string {
 }
 
 func (s *Scheduler) JobsCount() (total, pending, running, done, withErrors int, isError error) {
-  kvp, err := s.ListJobs()
-  if err != nil {
-    isError = err
-    return
-  }
-  for _, p := range kvp {
+	kvp, err := s.ListJobs()
+	if err != nil {
+		isError = err
+		return
+	}
+	for _, p := range kvp {
 		parts := strings.Split(p.Key, "/")
-    job, _ := s.GetJob(parts[2])
-    total++
-    if len(job.runs) == 0 { pending++ }
-    for _, r := range job.runs {
-      switch r.Status {
-        case "running":
-          running++
-        case "done":
-          done++
-        case "error":
-          withErrors++
-      }
-    }
-  }
-  return
+		job, _ := s.GetJob(parts[2])
+		total++
+		if len(job.runs) == 0 {
+			pending++
+		}
+		for _, r := range job.runs {
+			switch r.Status {
+			case "running":
+				running++
+			case "done":
+				done++
+			case "error":
+				withErrors++
+			}
+		}
+	}
+	return
 }
 
 func (s *Scheduler) AddJob(job *Job) error {
@@ -127,8 +145,12 @@ func (s *Scheduler) AddJob(job *Job) error {
 		return errors.New("JobExists")
 	}
 
-  if job.MaxInstancesPerNode == 0 { job.MaxInstancesPerNode=-1 }
-  if job.MaxInstances == 0 { job.MaxInstances=1 }
+	if job.MaxInstancesPerNode == 0 {
+		job.MaxInstancesPerNode = -1
+	}
+	if job.MaxInstances == 0 {
+		job.MaxInstances = 1
+	}
 	b, err := json.Marshal(job)
 	if err != nil {
 		return err
@@ -143,7 +165,7 @@ func (s *Scheduler) AddJob(job *Job) error {
 
 	jKey = fmt.Sprintf("jobs/%s/%s/runs", s.ID, job.ID)
 	jkv = &consulapi.KVPair{Key: jKey}
-  _, err = kv.Put(jkv, nil)
+	_, err = kv.Put(jkv, nil)
 	if err != nil {
 		//log.Printf("Error adding %#v\n", jkv)
 		return err
@@ -202,7 +224,7 @@ func (s *Scheduler) LoadRuns(job *Job) error {
 		} else if err != nil {
 			return err
 		}
-
+		e.Session = pair.Session
 		job.runs = append(job.runs, e)
 	}
 	return nil
@@ -240,7 +262,7 @@ func (s *Scheduler) GetJobKV(jobID string) (*consulapi.KVPair, error) {
 }
 
 func (s *Scheduler) AgentName() string {
-  return s.nodeName
+	return s.nodeName
 }
 
 func (s *Scheduler) updateCheck(check string) {
@@ -255,10 +277,12 @@ func (s *Scheduler) updateCheck(check string) {
 }
 
 func (s *Scheduler) LockExecutionRun(job *Job, er *ExecutionRun) (string, error) {
-  if job.CheckCommand == "" {
+	if job.CheckCommand == "" {
 		return "", errors.New("NoCheckCommand")
-  }
-  if job.CheckInterval == "" { job.CheckInterval = "30s" }
+	}
+	if job.CheckInterval == "" {
+		job.CheckInterval = "30s"
+	}
 
 	jKey := fmt.Sprintf("jobs/%s/%s/runs/%s/%s", s.ID, job.ID, er.Node, er.ID)
 	kv := s.Client.KV()
@@ -278,13 +302,15 @@ func (s *Scheduler) LockExecutionRun(job *Job, er *ExecutionRun) (string, error)
 	uid, _ := uuid.NewV4()
 	agent := s.Client.Agent()
 
-  err = agent.CheckRegister(&consulapi.AgentCheckRegistration{uid.String(), uid.String(), "", 
-    consulapi.AgentServiceCheck{Interval: job.CheckInterval, Script: job.CheckCommand }})
+	err = agent.CheckRegister(&consulapi.AgentCheckRegistration{uid.String(), uid.String(), "",
+		consulapi.AgentServiceCheck{Interval: job.CheckInterval, Script: job.CheckCommand}})
 	if err != nil {
 		return "", err
 	}
-  //TODO convert job.CheckInterval to integer
-  time.Sleep(time.Second*65)
+	log.Printf("Execution check register %s", uid.String())
+	//TODO convert job.CheckInterval to integer
+	dur, _ := time.ParseDuration(job.CheckInterval)
+	time.Sleep(time.Second * dur)
 	ses, _, err := session.Create(&consulapi.SessionEntry{Checks: []string{uid.String()}}, nil)
 	//ses, _, err:= session.CreateNoChecks(nil,nil)
 	if err != nil {
@@ -329,24 +355,29 @@ func (s *Scheduler) LockJob(jobID string) (string, error) {
 	}
 	err = agent.PassTTL(uid.String(), "")
 	if err != nil {
+		agent.CheckDeregister(uid.String())
 		return "", err
 	}
 
+	log.Printf("Job check register %s", uid.String())
 	go s.updateCheck(uid.String())
 
 	ses, _, err := session.Create(&consulapi.SessionEntry{Checks: []string{uid.String()}}, nil)
 	//ses, _, err:= session.CreateNoChecks(nil,nil)
 	if err != nil {
+		agent.CheckDeregister(uid.String())
 		return "", err
 	}
 
 	jkv.Session = ses
 	res, _, err := kv.Acquire(jkv, nil)
 	if err != nil {
+		agent.CheckDeregister(uid.String())
 		return "", err
 	}
 
 	if res == false {
+		agent.CheckDeregister(uid.String())
 		return "", errors.New("Can't lock job")
 	}
 
@@ -385,6 +416,7 @@ func (s *Scheduler) UnlockJob(jobID string) error {
 	}
 	for _, sic := range sesinfo.Checks {
 		agent := s.Client.Agent()
+		log.Printf("Check deregister %s\n", sic)
 		agent.CheckDeregister(sic)
 	}
 	_, err = session.Destroy(sess, nil)
@@ -421,6 +453,12 @@ func (s *Scheduler) GetJob(jobid string) (Job, error) {
 	return j, nil
 }
 
+func exitedSuccesfully(cmd *exec.Cmd) bool {
+	if cmd.ProcessState != nil {
+		return cmd.ProcessState.Success()
+	}
+	return false
+}
 func (s *Scheduler) ExecutionRun(job *Job) error {
 	var er ExecutionRun
 	uu, _ := uuid.NewV4()
@@ -433,7 +471,7 @@ func (s *Scheduler) ExecutionRun(job *Job) error {
 	er.StartTimeStr = fmt.Sprintln(time.Now())
 	job.StartTimeStr = fmt.Sprintln(time.Now())
 	er.Node = s.AgentName()
-  er.Status = "running"
+	er.Status = "running"
 	s.SaveRun(job, &er)
 
 	job.ExecutionNode = s.AgentName()
@@ -463,72 +501,91 @@ func (s *Scheduler) ExecutionRun(job *Job) error {
 		job.Output = string(out)
 		er.OutputErrors = string(stderr)
 		job.OutputErrors = string(stderr)
-    if string(stderr) == "" {
-      job.Status = "done"
-      er.Status = "done"
-    } else {
-      job.Status = "error"
-      er.Status = "error"
-    }
+
+		//log.Printf("************** %#v\n", sss.Commands()[0].ProcessState)
+		if exitedSuccesfully(sss.Commands()[0]) {
+			job.Status = "done"
+			er.Status = "done"
+		} else {
+			job.Status = "error"
+			er.Status = "error"
+		}
 	}
 	job.EndTime = time.Now().UnixNano()
 	er.EndTime = time.Now().UnixNano()
 	job.EndTimeStr = fmt.Sprintln(time.Now())
 	er.EndTimeStr = fmt.Sprintln(time.Now())
-  if job.CheckCommand != "" && job.Status == "done" {
-      job.Status = "running"
-      er.Status = "running"
-      s.SaveRun(job, &er)
-      sess, err:=s.LockExecutionRun(job, &er)
-      if err != nil {
-        log.Println(err)
-      }
-      log.Printf("Session ---------------- %s", sess)
-  } else {
-	  s.SaveRun(job, &er)
-  }
+	if job.CheckCommand != "" && job.Status == "done" {
+		job.Status = "running"
+		er.Status = "running"
+		s.SaveRun(job, &er)
+		sess, err := s.LockExecutionRun(job, &er)
+		if err != nil {
+			log.Println(err)
+		}
+		log.Printf("Session ---------------- %s", sess)
+	} else {
+		s.SaveRun(job, &er)
+	}
 	return nil
 }
 
 func (s *Scheduler) ShouldRun(job *Job) bool {
-  var liveExecutions, finishedExecutions, errorExecutions, totalExecutions,
-    nodeExecutions, nodeErrorExecutions, nodeLiveExecutions, nodeFinishedExecutions int
+	var liveExecutions, finishedExecutions, errorExecutions, totalExecutions,
+		nodeExecutions, nodeErrorExecutions, nodeLiveExecutions, nodeFinishedExecutions int
 
+	for _, r := range job.runs {
+		totalExecutions++
+		if r.Node == s.nodeName {
+			nodeExecutions++
+			if r.Status == "running" {
+				nodeLiveExecutions++
+			}
+			if r.Status == "done" {
+				nodeFinishedExecutions++
+			}
+			if r.Status == "error" {
+				nodeErrorExecutions++
+			}
+		}
 
-  for _, r := range job.runs {
-    totalExecutions++
-    if r.Node == s.nodeName {
-      nodeExecutions++
-      if r.Status == "running" { nodeLiveExecutions++ }
-      if r.Status == "done" { nodeFinishedExecutions++ }
-      if r.Status == "error" { nodeErrorExecutions++ }
-    }
-    if r.Status == "running" { liveExecutions++ }
-    if r.Status == "done" { finishedExecutions++ }
-    if r.Status == "error" { errorExecutions++ }
-  }
+		switch r.Status {
+		case "running":
+			if r.Session == "" {
+				errorExecutions++
+				r.Status = "error"
+				s.SaveRun(job, &r)
+			} else {
+				liveExecutions++
+			}
+		case "done":
+			finishedExecutions++
+		case "error":
+			errorExecutions++
+		}
+	}
 
-  if job.AllNodes && nodeExecutions == 0 {
-    return true
-  }
+	if job.AllNodes && nodeExecutions == 0 {
+		return true
+	}
 
-  if totalExecutions == 0 || totalExecutions < job.MaxInstances {
-    if len(job.TargetNodes)>0 {
-      for _, tn := range job.TargetNodes {
-        if tn == s.nodeName && (nodeExecutions == 0 || nodeExecutions < job.MaxInstancesPerNode || job.MaxInstancesPerNode == -1) {
-          return true
-        }
-      }
-    } else {
-      if nodeExecutions < job.MaxInstancesPerNode || job.MaxInstancesPerNode == -1 {
-        return true
-      } else {
-        return false
-      }
-    }
-  }
+	if totalExecutions == 0 || totalExecutions < job.MaxInstances {
+		if len(job.TargetNodes) > 0 {
+			for _, tn := range job.TargetNodes {
+				if tn == s.nodeName && (nodeExecutions == 0 || nodeExecutions < job.MaxInstancesPerNode || job.MaxInstancesPerNode == -1) {
+					return true
+				}
+			}
+		} else {
+			if nodeExecutions < job.MaxInstancesPerNode || job.MaxInstancesPerNode == -1 {
+				return true
+			} else {
+				return false
+			}
+		}
+	}
 
-  return false
+	return false
 }
 
 func (s *Scheduler) RunJob(jobID string) error {
@@ -537,19 +594,16 @@ func (s *Scheduler) RunJob(jobID string) error {
 	if err != nil {
 		return err
 	}
+	defer s.UnlockJob(jobID)
 
-  if !s.ShouldRun(&job){
-	  err = s.UnlockJob(jobID)
+	if !s.ShouldRun(&job) {
+		err = s.UnlockJob(jobID)
 		return errors.New("Job should not run in this node")
-  }
+	}
 	s.ExecutionRun(&job)
 
 	s.SaveJob(&job)
 
-	err = s.UnlockJob(jobID)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -660,6 +714,7 @@ type ExecutionRun struct {
 	StartTimeStr string
 	EndTimeStr   string
 	ExitErrors   string
+	Session      string
 }
 
 type Job struct {
@@ -676,13 +731,14 @@ type Job struct {
 	ExitErrors                              string
 	LogOutput                               bool
 	AllNodes                                bool
-  TargetNodes                             []string
-  MaxInstances                            int
-  MinInstances                            int
-  MaxInstancesPerNode                     int
-  CheckCommand                            string
-  CheckInterval                           string
-  StopCommand                             string
+	TargetNodes                             []string
+	MaxInstances                            int
+	MinInstances                            int
+	MaxInstancesPerNode                     int
+	MaxRetries                              int
+	CheckCommand                            string
+	CheckInterval                           string
+	StopCommand                             string
 	runs                                    []ExecutionRun
 }
 
@@ -699,6 +755,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "orkestrator"
 	app.Usage = "orchestrate consul cluster!"
+	app.Version = "0.0.1"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "scheduler",
@@ -712,6 +769,14 @@ func main() {
 		},
 	}
 	app.Commands = []cli.Command{
+		{
+			Name:      "version",
+			ShortName: "v",
+			Usage:     "orchestrator version",
+			Action: func(c *cli.Context) {
+				fmt.Println(app.Version)
+			},
+		},
 		{
 			Name:      "start",
 			ShortName: "s",
@@ -762,11 +827,16 @@ func main() {
 				cli.StringFlag{
 					Name:  "check_interval",
 					Value: "30s",
-          Usage: "check interval (ex: 2s)",
+					Usage: "check interval (ex: 2s)",
 				},
 				cli.BoolFlag{
 					Name:  "log",
 					Usage: "Log job output",
+				},
+				cli.StringFlag{
+					Name:  "timeout",
+					Value: "30s",
+					Usage: "job timeout (ex: 30s)",
 				},
 			},
 			Action: func(c *cli.Context) {
@@ -779,9 +849,14 @@ func main() {
 					job.Name = c.String("id")
 					job.Command = c.String("command")
 					job.LogOutput = c.Bool("log")
-          job.CheckCommand = c.String("check")
-          job.CheckInterval = c.String("check_interval")
-					err := sche.AddJob(&job)
+					job.CheckCommand = c.String("check")
+					job.CheckInterval = c.String("check_interval")
+					dur, err := time.ParseDuration(c.String("timeout"))
+					if err != nil {
+						log.Fatal("invalid timeout")
+					}
+					job.Timeout = dur
+					err = sche.AddJob(&job)
 					if err != nil {
 						log.Println(err)
 					}
