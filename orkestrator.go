@@ -12,7 +12,7 @@ type Orkestrator struct {
 	client *consulapi.Client
 }
 
-func NewOrkestrator(name string) *Orkestrator {
+func NewOrkestrator(name, node string) *Orkestrator {
 	if name == "" {
 		name = "main"
 	}

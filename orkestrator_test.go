@@ -10,12 +10,12 @@ func Test(t *testing.T) {
 	g := Goblin(t)
 	g.Describe("orkestrator", func() {
 		g.It("must be instantiated", func() {
-			ork := NewOrkestrator("")
+			ork := NewOrkestrator("", "")
 			g.Assert(ork != nil).IsTrue()
 		})
 
 		g.It("must register himself with consul", func() {
-			ork := NewOrkestrator("")
+			ork := NewOrkestrator("", "")
 			kvp, _, err := ork.Client().KV().Get("orkestrator/main", nil)
 			g.Assert(err).Equal(nil)
 			g.Assert(kvp.Key).Equal("orkestrator/main")
