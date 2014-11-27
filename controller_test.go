@@ -1,10 +1,9 @@
-package controller
+package orkestrator
 
 import (
-  "testing"
+	"testing"
 )
 
-
 func TestNewController(t *testing.T) {
-  
+
 }
