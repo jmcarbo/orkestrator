@@ -42,10 +42,10 @@ func main() () {
   var index uint64
   index = 0
   for {
-    kp, _, _ := kv.List("bla", &consulapi.QueryOptions{ WaitIndex: index })
+    kp, qm, _ := kv.List("bla", &consulapi.QueryOptions{ WaitIndex: index })
     for _, p := range kp {
       log.Printf("%s -- %s", p.Key, p.Value)
-      if p.ModifyIndex > index { index = p.ModifyIndex }
     }
+    index = qm.LastIndex
   }
 }
